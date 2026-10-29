@@ -1,0 +1,287 @@
+name: OTA release
+
+# Build, validate and (optionally) publish a Capgo bundle for the Android app.
+#
+# Two entry points:
+#   * push to main      → build + validate only. Nothing reaches users unless the
+#                         repository variable OTA_AUTO_PUBLISH is "true".
+#   * workflow_dispatch → explicit publish control, still gated by `publish`.
+#
+# Nothing here accepts a manual version override: the bundle version is derived
+# from package.json plus a monotonic release revision (the commit count), and the
+# minimum native version comes from ota.config.json. That is what makes a release
+# unique, correctly ordered, and compatible with the APKs already installed.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Capgo channel
+        required: true
+        default: production-android
+        type: choice
+        options:
+          - production-android
+          - staging-android
+      rollout:
+        description: Rollout percentage 1-100 (blank = channel default)
+        required: false
+        type: string
+      publish:
+        description: Upload the validated bundle to Capgo (off = build + validate only)
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'android/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ota-${{ github.event.inputs.channel || 'production-android' }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production-android
+    env:
+      OTA_CHANNEL: ${{ github.event.inputs.channel || 'production-android' }}
+      VITE_OTA_CHANNEL: ${{ github.event.inputs.channel || 'production-android' }}
+      POROKH_OTA_CHANNEL: ${{ github.event.inputs.channel || 'production-android' }}
+      # One identity per commit, shared by the Vercel deployment, the APK build
+      # and this bundle, so the app can tell "same build" from "new build".
+      POROKH_BUILD_ID: ${{ github.sha }}
+      # The bundled web app must refuse unsigned releases in exactly the builds
+      # whose APK embeds a public key.
+      VITE_OTA_REQUIRE_SIGNATURE: 'true'
+      POROKH_OTA_REQUIRE_SIGNATURE: 'true'
+      CAPGO_PUBLIC_KEY: ${{ vars.CAPGO_PUBLIC_KEY }}
+      # The CLI reads the credential from CAPGO_TOKEN, which keeps it out of the
+      # process arguments (`--apikey` values are visible in `ps` on the runner).
+      CAPGO_TOKEN: ${{ secrets.CAPGO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Configure frontend environment
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_ANON_KEY}" ]; then
+            echo "::error::VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY repository secrets are required; without them OTA bundles crash on startup with a white screen."
+            exit 1
+          fi
+          {
+            printf 'VITE_SUPABASE_URL=%s\n' "$SUPABASE_URL"
+            printf 'VITE_SUPABASE_ANON_KEY=%s\n' "$SUPABASE_ANON_KEY"
+          } > .env.local
+
+      - name: Require the signing public key
+        run: |
+          set -euo pipefail
+          if [ -z "${CAPGO_PUBLIC_KEY:-}" ]; then
+            echo "::error::CAPGO_PUBLIC_KEY is not configured. Set the repository variable to the Capgo key-v2 public key; APKs built with signature enforcement cannot verify any bundle without it."
+            exit 1
+          fi
+          node -e "
+            const key = (process.env.CAPGO_PUBLIC_KEY || '').replace(/\\\\n/g, '\n').trim();
+            if (!key.startsWith('-----BEGIN RSA PUBLIC KEY-----')) {
+              console.error('::error::CAPGO_PUBLIC_KEY is not a PKCS#1 RSA public key');
+              process.exit(1);
+            }
+            if (!key.endsWith('-----END RSA PUBLIC KEY-----')) {
+              console.error('::error::CAPGO_PUBLIC_KEY is truncated');
+              process.exit(1);
+            }
+            console.log('public key present (PKCS#1 RSA)');
+          "
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Verify the build manifest
+        run: |
+          set -euo pipefail
+          test -f dist/version.json || { echo "::error::dist/version.json was not generated"; exit 1; }
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('dist/version.json', 'utf8'));
+            if (!m.buildId || !m.version || !m.channel) {
+              console.error('::error::version.json is missing required fields', m);
+              process.exit(1);
+            }
+            if (m.buildId !== process.env.POROKH_BUILD_ID.slice(0, 12)) {
+              console.error('::error::version.json buildId does not match the commit', m.buildId);
+              process.exit(1);
+            }
+            if (m.channel !== process.env.POROKH_OTA_CHANNEL) {
+              console.error('::error::version.json channel does not match POROKH_OTA_CHANNEL', m.channel);
+              process.exit(1);
+            }
+            console.log('manifest', m);
+          "
+
+      - name: Resolve the bundle version and validate the release
+        id: release
+        run: |
+          set -euo pipefail
+          summary="$(node node_modules/tsx/dist/cli.mjs scripts/check-release.ts)"
+          printf '%s\n' "$summary" | tee -a "$GITHUB_OUTPUT"
+          {
+            echo "### OTA release"
+            echo ""
+            printf '%s\n' "$summary" | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve publish intent
+        id: intent
+        env:
+          DISPATCH_PUBLISH: ${{ github.event.inputs.publish }}
+          AUTO_PUBLISH: ${{ vars.OTA_AUTO_PUBLISH }}
+          COMPUTED_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CAPGO_TOKEN:-}" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CAPGO_API_KEY is not configured, so no OTA bundle can be published. Installed apps keep running the frontend baked into their APK."
+            exit 0
+          fi
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "publish=${DISPATCH_PUBLISH:-false}" >> "$GITHUB_OUTPUT"
+          elif [ "${AUTO_PUBLISH}" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Bundle ${COMPUTED_VERSION} built and validated but not published. Dispatch with publish=true, or set OTA_AUTO_PUBLISH=true."
+          fi
+
+      - name: Provision the signing key
+        if: steps.intent.outputs.publish == 'true'
+        env:
+          CAPGO_PRIVATE_KEY: ${{ secrets.CAPGO_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CAPGO_PRIVATE_KEY:-}" ]; then
+            echo "::error::CAPGO_PRIVATE_KEY is not configured. Refusing to publish an unsigned (clear) bundle."
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/capgo_key_v2"
+          umask 077
+          printf '%s' "$CAPGO_PRIVATE_KEY" | sed 's/\\n/\n/g' > "$key_path"
+          chmod 600 "$key_path"
+          if ! grep -q 'PRIVATE KEY-----' "$key_path"; then
+            echo "::error::CAPGO_PRIVATE_KEY does not look like a PEM private key."
+            rm -f "$key_path"
+            exit 1
+          fi
+          echo "CAPGO_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "signing key provisioned"
+
+      - name: Validate the release with signing credentials
+        if: steps.intent.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          # --publish requires the key material; --registry rejects a version that
+          # already exists before anything is uploaded.
+          node node_modules/tsx/dist/cli.mjs scripts/check-release.ts --publish --registry
+
+      - name: Upload to Capgo
+        if: steps.intent.outputs.publish == 'true'
+        env:
+          BUNDLE_VERSION: ${{ steps.release.outputs.version }}
+          ROLLOUT: ${{ github.event.inputs.rollout }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BUNDLE_VERSION:-}" ]; then
+            echo "::error::No bundle version was produced"
+            exit 1
+          fi
+          if [ -z "${CAPGO_PRIVATE_KEY_PATH:-}" ]; then
+            echo "::error::No signing key path; refusing to upload an unsigned bundle."
+            exit 1
+          fi
+
+          args=(
+            bundle upload net.porokh.app
+            --path dist
+            --channel "$OTA_CHANNEL"
+            --bundle "$BUNDLE_VERSION"
+            --comment "Git ${GITHUB_SHA::7}"
+            --key-v2 "$CAPGO_PRIVATE_KEY_PATH"
+            --fail-on-incompatible
+          )
+
+          if [ -n "${ROLLOUT:-}" ]; then
+            args+=(--rollout "$ROLLOUT")
+          fi
+
+          # The credential arrives through CAPGO_TOKEN, so it never appears on
+          # the command line.
+          node node_modules/@capgo/cli/dist/index.js "${args[@]}"
+
+      - name: Verify the published bundle is retrievable
+        if: steps.intent.outputs.publish == 'true'
+        env:
+          BUNDLE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Read-only: ask the service the same way a device would, and require
+          # the bundle just uploaded to come back.
+          set +e
+          node node_modules/@capgo/cli/dist/index.js bundle list net.porokh.app \
+            > "$RUNNER_TEMP/bundles.txt" 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            sed 's/^/  /' "$RUNNER_TEMP/bundles.txt"
+            echo "::error::Could not read the bundle list after publishing; treat this release as unverified."
+            exit 1
+          fi
+          if ! grep -Fq -- "$BUNDLE_VERSION" "$RUNNER_TEMP/bundles.txt"; then
+            echo "::error::Published bundle $BUNDLE_VERSION was not returned by the Capgo bundle list; treat this release as unverified."
+            exit 1
+          fi
+          echo "verified: $BUNDLE_VERSION is retrievable"
+
+      - name: Remove the signing key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/capgo_key_v2"
+          echo "signing key removed from the runner"
+
+      - name: Summarise
+        if: always()
+        env:
+          BUNDLE_VERSION: ${{ steps.release.outputs.version }}
+          MIN_NATIVE: ${{ steps.release.outputs.min_native_version }}
+          SCHEMA: ${{ steps.release.outputs.schema_version }}
+          SIGNATURE: ${{ steps.release.outputs.signature_required }}
+          PUBLISHED: ${{ steps.intent.outputs.publish }}
+        run: |
+          {
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${GITHUB_SHA:0:7}\` |"
+            echo "| Channel | ${OTA_CHANNEL} |"
+            echo "| Bundle | ${BUNDLE_VERSION:-not resolved} |"
+            echo "| Native requirement | nv${MIN_NATIVE:-?} |"
+            echo "| Schema | db${SCHEMA:-?} |"
+            echo "| Signature required | ${SIGNATURE:-?} |"
+            echo "| Published | ${PUBLISHED:-false} |"
+          } >> "$GITHUB_STEP_SUMMARY"

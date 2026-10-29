@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* --- Semantic Theme Variables (Default Fallbacks) --- */
+  :root {
+    --bg-app: #F8FAFC;
+    --bg-surface: #FFFFFF;
+    --bg-surface-elevated: #FFFFFF;
+    --text-primary: #0F172A;
+    --text-secondary: #64748B;
+    --border-color: #E2E8F0;
+    --input-bg: #FFFFFF;
+    --input-border: #CBD5E1;
+    --primary: #2563EB;
+    --primary-foreground: #FFFFFF;
+    --secondary: #F1F5F9;
+    --accent: #4F46E5;
+    --success: #10B981;
+    --warning: #F59E0B;
+    --danger: #EF4444;
+    --info: #0EA5E9;
+    --nav-bg: #FFFFFF;
+    --nav-text: #64748B;
+    --card-bg: #FFFFFF;
+    --card-border: #E2E8F0;
+    --badge-bg: #DBEAFE;
+    --badge-text: #1E40AF;
+    --focus-ring: #93C5FD;
+    color-scheme: light;
+  }
+
+  .dark {
+    --bg-app: #0F1115;
+    --bg-surface: #1E293B;
+    --bg-surface-elevated: #334155;
+    --text-primary: #F8FAFC;
+    --text-secondary: #94A3B8;
+    --border-color: #334155;
+    --input-bg: #0F172A;
+    --input-border: #475569;
+    --primary: #3B82F6;
+    --primary-foreground: #FFFFFF;
+    --secondary: #1E293B;
+    --accent: #6366F1;
+    --success: #10B981;
+    --warning: #F59E0B;
+    --danger: #EF4444;
+    --info: #0EA5E9;
+    --nav-bg: #1E293B;
+    --nav-text: #94A3B8;
+    --card-bg: #1E293B;
+    --card-border: #334155;
+    --badge-bg: #1E3A8A;
+    --badge-text: #DBEAFE;
+    --focus-ring: #3B82F6;
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+  }
+
+  body {
+    @apply bg-app text-text-primary font-sans;
+  }
+}
+
+@layer components {
+  /* Shared Base Helpers */
+  .page-title {
+    @apply text-2xl font-bold text-text-primary font-['Hind_Siliguri'];
+  }
+  .page-subtitle {
+    @apply text-text-secondary font-['Hind_Siliguri'];
+  }
+}
+
+/* Utilities */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

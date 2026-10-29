@@ -1,0 +1,49 @@
+{
+  "name": "parapoth-backend",
+  "version": "1.0.0",
+  "description": "Backend API for ParaPoth Educational Platform",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "test": "tsx --test src/config/cors.spec.ts src/middlewares/authorization.spec.ts src/features/content/question.policy.spec.ts src/features/exams/exam.grading.spec.ts src/features/exams/exam.bookmark.spec.ts src/features/exams/exam.service.spec.ts src/features/exams/exam.attempt.spec.ts src/features/exams/exam.security.spec.ts src/features/exams/exam.hardening.spec.ts src/features/exams/exam.quota.spec.ts src/features/exams/exam.practice.spec.ts src/features/exams/exam.authoring.spec.ts src/features/auth/auth.security.spec.ts src/features/profile/profile.security.spec.ts src/features/app-builder/app-builder.security.spec.ts src/features/history/history.security.spec.ts src/features/content/content.premium.spec.ts src/features/access/access.service.spec.ts src/features/access/access.routes.spec.ts src/features/access/access.http.spec.ts src/features/access/dhaka-time.spec.ts src/features/finance/finance.payment.spec.ts src/features/content/questionBank.rpc.security.spec.ts src/features/groups/groups.admin.security.spec.ts src/features/groups/groups.validation.spec.ts src/features/groups/groups.chat.spec.ts src/features/groups/groups.scoring.spec.ts src/features/groups/groups.errors.spec.ts",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "test:sql": "bash supabase/tests/run-mistake-tests.sh"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.101.1",
+    "axios": "^1.14.0",
+    "cloudinary": "^2.9.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.18.3",
+    "firebase-admin": "^13.8.0",
+    "jsonwebtoken": "^9.0.3",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.4",
+    "qrcode": "^1.5.4",
+    "redis": "^4.6.13",
+    "speakeasy": "^2.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.19.37",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^7.0.11",
+    "@types/qrcode": "^1.5.6",
+    "@types/speakeasy": "^2.0.10",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  }
+}

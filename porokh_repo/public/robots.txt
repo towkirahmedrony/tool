@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /
+
+# Public static assets needed for Google rendering
+Allow: /assets/
+Allow: /icons/
+Allow: /grids/
+Allow: /avatars/
+
+# Keep private/app-only areas out of crawl budget
+Disallow: /dashboard/
+Disallow: /notifications/
+Disallow: /settings/
+Disallow: /profile/
+Disallow: /edit-profile/
+Disallow: /checkout/
+Disallow: /change-password/
+Disallow: /forgot-password/
+
+# Avoid duplicate crawl URLs with query parameters
+Disallow: /*?*
+
+Sitemap: https://parapothexam.web.app/sitemap.xml

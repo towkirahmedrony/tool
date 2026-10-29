@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Porokh</string>
+    <string name="title_activity_main">Porokh</string>
+    <string name="package_name">net.porokh.app</string>
+    <string name="custom_url_scheme">net.porokh.app</string>
+</resources>

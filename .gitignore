@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+*/node_modules/
+*/*/node_modules/
+
+# Build artifacts
+dist/
+*/dist/
+build/
+*/build/
+out/
+.next/
+*.tsbuildinfo
+*.bak-debug
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# System & Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+npm-debug.log*
+
+# Media output / temporary files
+media-output/
+tmp/
+temp/

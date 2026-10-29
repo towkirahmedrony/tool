@@ -1,0 +1,149 @@
+import { supabase } from '../../config/supabase';
+import {
+  buildAdminProfileUpdatePayload,
+  parseThemePreference,
+  ProfileValidationError,
+} from './profile.validation';
+
+export const getAdminIdentity = async (adminId: string) => {
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    // এখানে settings কলামটি যুক্ত করা হয়েছে
+    .select('id, full_name, username, email, phone_number, bio, gender, date_of_birth, address, language_preference, avatar_url, account_status, created_at, is_2fa_enabled, settings')
+    .eq('id', adminId)
+    .single();
+
+  if (profileError) throw profileError;
+
+  const { data: roleData, error: roleError } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', adminId)
+    .eq('is_active', true)
+    .single();
+
+  if (roleError && roleError.code !== 'PGRST116') throw roleError;
+
+  return {
+    ...profile,
+    role: roleData?.role || 'admin',
+  };
+};
+
+export const updateAdminIdentity = async (adminId: string, data: unknown) => {
+  const safeUpdate = buildAdminProfileUpdatePayload(data);
+
+  if (Object.keys(safeUpdate).length === 0) {
+    throw new ProfileValidationError('No editable profile fields supplied');
+  }
+
+  const { data: updatedProfile, error } = await supabase
+    .from('profiles')
+    .update(safeUpdate)
+    .eq('id', adminId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return updatedProfile;
+};
+
+// নতুন মেথড: এডমিনের থিম সেটিংস আপডেট করার জন্য
+export const updateAdminThemePreference = async (adminId: string, theme: unknown) => {
+  const safeTheme = parseThemePreference(theme);
+
+  const { data: profile } = await supabase.from('profiles').select('settings').eq('id', adminId).single();
+  
+  const currentSettings = (profile?.settings as Record<string, any>) || {};
+  const updatedSettings: Record<string, any> = { ...currentSettings, theme: safeTheme };
+  delete updatedSettings.two_factor_secret;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ settings: updatedSettings })
+    .eq('id', adminId)
+    .select('settings')
+    .single();
+
+  if (error) throw error;
+  return data?.settings;
+};
+
+export const getAdminPerformance = async (adminId: string, timeframe: string) => {
+  const { data, error } = await supabase
+    .from('admin_performance_stats')
+    .select('*')
+    .eq('admin_id', adminId)
+    .order('month', { ascending: false })
+    .limit(1);
+
+  if (error) throw error;
+  return data[0] || {};
+};
+
+export const getSecurityData = async (adminId: string) => {
+  const [sessionsRes, loginsRes] = await Promise.all([
+    supabase.from('admin_sessions').select('id, is_2fa_verified, last_active').eq('admin_id', adminId),
+    supabase.from('admin_login_history').select('*').eq('admin_id', adminId).order('login_at', { ascending: false }).limit(10)
+  ]);
+
+  if (sessionsRes.error) throw sessionsRes.error;
+  if (loginsRes.error) throw loginsRes.error;
+
+  return {
+    trustedDevices: sessionsRes.data,
+    loginHistory: loginsRes.data,
+  };
+};
+
+export const removeTrustedDevice = async (adminId: string, sessionId: string) => {
+  const { error } = await supabase
+    .from('admin_sessions')
+    .delete()
+    .eq('id', sessionId)
+    .eq('admin_id', adminId);
+
+  if (error) throw error;
+  return { success: true };
+};
+
+export const toggle2FA = async (adminId: string, isEnabled: boolean) => {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ is_2fa_enabled: isEnabled })
+    .eq('id', adminId);
+
+  if (error) throw error;
+  return { is_2fa_enabled: isEnabled };
+};
+
+export const getAdminPermissions = async (adminId: string) => {
+  const { data: roleData } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', adminId)
+    .eq('is_active', true)
+    .single();
+
+  if (!roleData?.role) return [];
+
+  const { data: permissionsData, error } = await supabase
+    .from('role_permissions')
+    .select('permissions(action)')
+    .eq('role', roleData.role);
+
+  if (error) throw error;
+  return permissionsData.map((p: any) => p.permissions.action);
+};
+
+export const getAdminAuditTrail = async (adminId: string) => {
+  const { data, error } = await supabase
+    .from('audit_logs')
+    .select('*')
+    .eq('user_id', adminId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) throw error;
+  return data;
+};
